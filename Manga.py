@@ -131,7 +131,7 @@ def mergePDFS(direc,name):
 
     # Function that finds the numeric part of the pdf name
     def get_numeric_part(filename):
-        return int(''.join(filter(str.isdigit, os.path.basename(filename))))
+        return float(filename.split("-")[-1].replace(".pdf",""))
 
     # Sorts the pdf files according to the chapter number
     pdfFiles.sort(key=get_numeric_part)
@@ -146,6 +146,18 @@ def mergePDFS(direc,name):
     merger.close()
 
 
+def getAllLinks(link : str,name : str) -> None:
+    session = requests.session()
+    text = session.get(link).text
+    parsedData = bs(text,"lxml")
+    chapList = parsedData.find("div",{"class":"panel-story-chapter-list"})
+    chapters = list(chapList.find_all("li",{"class":"a-h"}))
+    chapters.reverse()
+    for i in range(len(chapters)):
+        chapLink = chapters[i].find("a").get("href")
+        chapNum = chapLink.split("-")[-1]
+        save(chapLink,name,chapNum)
+        pdfize(f"./{name}/{name}-{chapNum}",name,chapNum)
 
 # Saves the chapter in the designated folder
 def save(link: str,name: str,chapter: int):
@@ -156,7 +168,8 @@ def save(link: str,name: str,chapter: int):
     # Soups the data so we can look through it
     text = bs(text,"lxml")
     # Gets the div where all the images are stored
-    imgDiv = [div for div in text.find_all("div") if "reader" in str(div.get("class"))][0]
+    imgDiv = text.find("div",{"class":"container-chapter-reader"})
+    # imgDiv = [div for div in text.find_all("div") if "reader" in str(div.get("class"))][0]
     # Gets all the image links
     imgs = [img.get("src") for img in imgDiv.find_all("img") if "page" in str(img.get("title"))]
     # Headers extracted manually from the website
@@ -183,28 +196,67 @@ def save(link: str,name: str,chapter: int):
         print("Directory exists")
     # Loops through all images and shows progress in the progress bar
     for i in tqdm(range(0,len(imgs)), colour=randomColorCode(), desc=f"Chapter {chapter}"):
-        # Requests the files using the session and the extracted headers
-        res = sesh.get(imgs[i],headers=headers)
+        if not os.path.exists(f"./{name}/{name}-{chapter}/{i}.jpg"):
+            # Requests the files using the session and the extracted headers
+            res = sesh.get(imgs[i],headers=headers)
 
-        # If server response is OK we save the image
-        if res.status_code == 200:
-            # Reads the bytes from the response
-            image_content = BytesIO(res.content)
-            # Opens the bytes as an image
-            image = Image.open(image_content)
-            # Changes mode from P mode to RGB
-            image = image.convert('RGB')
-            # Saves the image in its designated directory
-            image.save(f"./{name}/{name}-{chapter}/{i}.jpg")
-        # If response isnt OK we log an error 
+            # If server response is OK we save the image
+            if res.status_code == 200:
+                # Reads the bytes from the response
+                image_content = BytesIO(res.content)
+                # Opens the bytes as an image
+                image = Image.open(image_content)
+                # Changes mode from P mode to RGB
+                image = image.convert('RGB')
+                # Saves the image in its designated directory
+                image.save(f"./{name}/{name}-{chapter}/{i}.jpg")
+            # If response isnt OK we log an error 
+            else:
+                print(res.status_code)
         else:
-            print(res.status_code)
+            print(f"Page {i} of chapter {chapter} exists, skipping...")
 
 
+# Checks if link is a valid link
+def isValidLink(link: str) -> bool:
+    # Checks if the connection is secure
+    if "https" not in link:
+        return False
+    # Checks if the link format is correct
+    if link[len(link) - 1] == "/":
+        return False
+    # Splits link into parts
+    linkSplit : list = link.split("/")
+    # Checks if the correct domain is provided
+    if "chapmanganato.com" not in linkSplit[2]:
+        return False
+    return True
+
+
+# Deprecated main function
+def mainDep():
+    # Asks for user input of link
+    link: str= input("Enter link: ")
+    # Asks for chapter
+    chapter: int = int(input("Enter chapter: "))
+    # Creates link using provided data
+    link = f"{link}/chapter-{chapter}"
+    # Asks for manga name
+    name: str = input("Enter name: ")
+    # Saves the chapter
+    save(link,name,chapter)
+    # Makes a pdf of the chapter
+    pdfize(f"./{name}-{chapter}",name,chapter)
+
+def processLink(link : str) -> str:
+    linkArr : list = link.split("/")
+    return "https://chapmanganato.com/"+linkArr[-1]
 # Working main function
 def main():
     # Takes user input for search query
     linkMain, name = searchForManga(input("Enter manga name to search for: "))
+    mangaLink : str = linkMain
+    linkMain = processLink(linkMain)
     # Prints the latest chapter
     print(f"The latest chapter is: {getLatestChapter(linkMain)}")
     try:
@@ -221,25 +273,29 @@ def main():
         os.mkdir(f"./{name}")
     except:
         print("Parent directory exists")
-    # Loops through all chapter
-    for i in  list(range(chapterStart,chapterStart+numChapter)):
-        # Defines chapter as the current index
-        chapter = i
-        # Define link using given chapter
-        link = f"{linkMain}/chapter-{chapter}"
-        # Logs the start of saving
-        print(f"Saving chapter {chapter}")
-        # Saves given chapter
-        save(link,name,chapter)
-        print("\n")
-        # Creates pdf of the chapter
-        pdfize(f"./{name}/{name}-{chapter}",name,chapter)
-        print("\n")
-    # Logs the start of merging the pdfs
-    print("Started merging")
-    # Starts merging
-    mergePDFS(f"./{name}",name)
 
+    if numChapter >= 99999:
+        getAllLinks(mangaLink,name)
+    else:
+        # Loops through all chapter
+        for i in  list(range(chapterStart,chapterStart+numChapter)):
+            # Defines chapter as the current index
+            chapter = i
+            # Define link using given chapter
+            link = f"{linkMain}/chapter-{chapter}"
+            # Logs the start of saving
+            print(f"Saving chapter {chapter}")
+            # Saves given chapter
+            save(link,name,chapter)
+            print("\n")
+            # Creates pdf of the chapter
+            pdfize(f"./{name}/{name}-{chapter}",name,chapter)
+            print("\n")
+        # Logs the start of merging the pdfs
+        print("Started merging")
+        # Starts merging
+    mergePDFS(f"./{name}",name)
+    
 # Runs if the script is used directly and not as an import
 if __name__ == '__main__':
     main()
